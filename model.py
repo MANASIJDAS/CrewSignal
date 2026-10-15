@@ -4,20 +4,30 @@ from sklearn.ensemble import RandomForestClassifier
 
 from data import FEATURE_COLUMNS, _generate_synthetic_training_data, compute_personal_baseline
 
-
 MODEL_PATH = "crew_signal_model.joblib"
+RISK_LEVELS = ["LOW", "MODERATE", "HIGH", "CRITICAL"]
+
+
+def _risk_state_from_score(score):
+    if score >= 6:
+        return 3
+    if score >= 4:
+        return 2
+    if score >= 2:
+        return 1
+    return 0
 
 
 def build_random_forest_model():
     df = _generate_synthetic_training_data(n_samples=1500, seed=42)
     features = df[FEATURE_COLUMNS]
     target = df["risk_state"]
-
     model = RandomForestClassifier(
         n_estimators=50,
         random_state=42,
         class_weight="balanced",
         min_samples_leaf=2,
+        max_depth=8,
         n_jobs=-1,
     )
     model.fit(features, target)
@@ -32,22 +42,16 @@ def load_or_train_model():
 def _baseline_deviation(row, baseline):
     deviations = {}
     for key in FEATURE_COLUMNS:
-        baseline_value = baseline.get(key, {}).get("mean", 0.0)
+        baseline_value = baseline.get(key, {}).get("mean", float(row.get(key, 0.0)))
         std_value = baseline.get(key, {}).get("std", 1.0)
         value = float(row.get(key, 0.0))
         deviation = (value - baseline_value) / max(std_value, 1.0)
-        deviations[key] = deviation
+        deviations[key] = round(float(deviation), 3)
     return deviations
 
 
-def _severity_state(label):
-    mapping = {
-        0: "LOW",
-        1: "MODERATE",
-        2: "HIGH",
-        3: "CRITICAL",
-    }
-    return mapping.get(int(label), "LOW")
+def _label_from_index(index):
+    return RISK_LEVELS[int(index)]
 
 
 def predict_from_recent(model_bundle, recent_df):
@@ -66,18 +70,20 @@ def predict_from_recent(model_bundle, recent_df):
         return "INSUFFICIENT EVIDENCE", 0.0, {}, "insufficient"
 
     baseline = compute_personal_baseline(recent)
-    features_for_model = recent[feature_names].tail(1)
-    probabilities = model.predict_proba(features_for_model)[0]
+    recent = recent.tail(12)
+    latest = recent.iloc[-1].to_dict()
+    feature_row = pd.DataFrame([latest])
+    feature_row = feature_row[feature_names]
+
+    probabilities = model.predict_proba(feature_row)[0]
     pred_index = int(np.argmax(probabilities))
     confidence = float(probabilities[pred_index])
 
-    if confidence < 0.55:
+    if confidence < 0.52:
         return "INSUFFICIENT EVIDENCE", confidence, {}, "insufficient"
 
-    predicted_label = _severity_state(pred_index)
-    latest = recent.iloc[-1].to_dict()
-    latest_deviation = _baseline_deviation(latest, baseline)
-
+    predicted_label = _label_from_index(pred_index)
+    deviation_map = _baseline_deviation(latest, baseline)
     top_features = dict(
         sorted(
             zip(feature_names, model.feature_importances_),
@@ -86,15 +92,28 @@ def predict_from_recent(model_bundle, recent_df):
         )[:5]
     )
 
-    explanation = {}
-    for feature, importance in top_features.items():
-        explanation[feature] = round(float(importance), 4)
+    explanation = {feature: round(float(weight), 4) for feature, weight in top_features.items()}
+    risk_payload = {
+        "confidence": confidence,
+        "prediction": predicted_label,
+        "deviation": deviation_map,
+        "explanation": explanation,
+    }
+
+    if predicted_label in ["HIGH", "CRITICAL"]:
+        return predicted_label, confidence, explanation, "sufficient"
+    if predicted_label == "MODERATE":
+        for key, value in deviation_map.items():
+            if abs(value) > 1.5:
+                return predicted_label, confidence, explanation, "sufficient"
+        return "INSUFFICIENT EVIDENCE", confidence, explanation, "insufficient"
 
     return predicted_label, confidence, explanation, "sufficient"
 
 
 __all__ = [
     "FEATURE_COLUMNS",
+    "RISK_LEVELS",
     "build_random_forest_model",
     "load_or_train_model",
     "predict_from_recent",
