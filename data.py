@@ -211,7 +211,7 @@ def _generate_synthetic_training_data(n_samples=1500, seed=42):
 def generate_astronaut_scenario(name="Casey", days=7, seed=42, scenario="baseline"):
     rng = np.random.default_rng(seed)
     start = pd.Timestamp.utcnow().normalize() - pd.Timedelta(days=max(days - 1, 0))
-    timestamps = pd.date_range(start=start, periods=days * 24, freq="H")
+    timestamps = pd.date_range(start=start, periods=days * 24, freq="h")
     rows = []
 
     for idx, ts in enumerate(timestamps):
