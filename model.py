@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from functools import lru_cache
 from sklearn.ensemble import RandomForestClassifier
 
 from data import FEATURE_COLUMNS, _generate_synthetic_training_data, compute_personal_baseline
@@ -8,17 +9,8 @@ MODEL_PATH = "crew_signal_model.joblib"
 RISK_LEVELS = ["LOW", "MODERATE", "HIGH", "CRITICAL"]
 
 
-def _risk_state_from_score(score):
-    if score >= 6:
-        return 3
-    if score >= 4:
-        return 2
-    if score >= 2:
-        return 1
-    return 0
-
-
-def build_random_forest_model():
+@lru_cache(maxsize=1)
+def load_or_train_model():
     df = _generate_synthetic_training_data(n_samples=1500, seed=42)
     features = df[FEATURE_COLUMNS]
     target = df["risk_state"]
@@ -31,12 +23,22 @@ def build_random_forest_model():
         n_jobs=-1,
     )
     model.fit(features, target)
+    return model, FEATURE_COLUMNS
+
+
+def build_random_forest_model():
+    model, _ = load_or_train_model()
     return model
 
 
-def load_or_train_model():
-    model = build_random_forest_model()
-    return model, FEATURE_COLUMNS
+def _risk_state_from_score(score):
+    if score >= 6:
+        return 3
+    if score >= 4:
+        return 2
+    if score >= 2:
+        return 1
+    return 0
 
 
 def _baseline_deviation(row, baseline):
@@ -93,12 +95,6 @@ def predict_from_recent(model_bundle, recent_df):
     )
 
     explanation = {feature: round(float(weight), 4) for feature, weight in top_features.items()}
-    risk_payload = {
-        "confidence": confidence,
-        "prediction": predicted_label,
-        "deviation": deviation_map,
-        "explanation": explanation,
-    }
 
     if predicted_label in ["HIGH", "CRITICAL"]:
         return predicted_label, confidence, explanation, "sufficient"
