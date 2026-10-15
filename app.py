@@ -10,6 +10,7 @@ from data import (
     generate_astronaut_scenario,
     initialize_store,
     load_data_store,
+    reconcile_data_store,
     save_to_data_store,
 )
 from model import load_or_train_model, predict_from_recent
@@ -93,6 +94,9 @@ with st.sidebar:
     if st.button("Replay scenario"):
         profile, _ = refresh_scenario(astronaut_name, scenario)
         st.session_state.profile = profile
+        st.rerun()
+    if st.button("Reconcile records"):
+        reconcile_data_store()
         st.rerun()
     if st.button("Load latest record set"):
         st.rerun()
