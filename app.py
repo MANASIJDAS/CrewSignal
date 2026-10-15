@@ -1,8 +1,11 @@
+import os
+import sqlite3
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from datetime import datetime
 
 from data import (
     FEATURE_COLUMNS,
@@ -18,6 +21,17 @@ from model import load_or_train_model, predict_from_recent
 initialize_store()
 
 st.set_page_config(page_title="CrewSignal", layout="wide")
+
+
+def offline_status():
+    db_path = "crew_signal.db"
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute("SELECT 1")
+        conn.close()
+        return True
+    except Exception:
+        return False
 
 
 def latest_profile():
@@ -85,7 +99,12 @@ if "profile" not in st.session_state:
 
 st.title("CrewSignal")
 st.caption("Synthetic astronaut health monitoring · decision support prototype")
-st.info("Offline-ready local SQLite storage active.")
+
+online = offline_status()
+if online:
+    st.success("Offline mode active · local SQLite available")
+else:
+    st.warning("Offline mode unavailable · local persistence not reachable")
 
 with st.sidebar:
     st.subheader("Mission")
